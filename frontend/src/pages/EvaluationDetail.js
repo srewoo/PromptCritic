@@ -4,16 +4,21 @@ import { API } from "../App";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Download, Loader2, TrendingUp, TrendingDown } from "lucide-react";
+import { ArrowLeft, Download, Loader2, TrendingUp, TrendingDown, Sparkles, Copy, DollarSign } from "lucide-react";
 import { useToast } from "../hooks/use-toast";
 import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../components/ui/accordion";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
+import { Textarea } from "../components/ui/textarea";
 
 export default function EvaluationDetail() {
   const { id } = useParams();
   const [evaluation, setEvaluation] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [rewriting, setRewriting] = useState(false);
+  const [rewriteResult, setRewriteResult] = useState(null);
+  const [showRewriteDialog, setShowRewriteDialog] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -36,6 +41,40 @@ export default function EvaluationDetail() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRewrite = async () => {
+    if (!evaluation) return;
+    
+    setRewriting(true);
+    try {
+      const response = await axios.post(`${API}/rewrite`, {
+        prompt_text: evaluation.prompt_text,
+        evaluation_id: evaluation.id
+      });
+      setRewriteResult(response.data);
+      setShowRewriteDialog(true);
+      toast({
+        title: "Prompt Rewritten!",
+        description: "AI has improved your prompt based on the evaluation"
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Rewrite Failed",
+        description: error.response?.data?.detail || "An error occurred"
+      });
+    } finally {
+      setRewriting(false);
+    }
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Copied!",
+      description: "Text copied to clipboard"
+    });
   };
 
   const getScoreColor = (score) => {
@@ -87,6 +126,17 @@ export default function EvaluationDetail() {
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-4xl font-bold text-white">Evaluation Details</h1>
             <div className="flex gap-2">
+              <Button
+                onClick={handleRewrite}
+                disabled={rewriting}
+                className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white"
+              >
+                {rewriting ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Rewriting...</>
+                ) : (
+                  <><Sparkles className="mr-2 h-4 w-4" /> AI Rewrite</>
+                )}
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => window.open(`${API}/export/json/${evaluation.id}`, '_blank')}
@@ -155,6 +205,41 @@ export default function EvaluationDetail() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Cost Information */}
+        {evaluation.cost && (
+          <Card className="bg-slate-800/50 border-slate-700 mb-6">
+            <CardHeader>
+              <CardTitle className="text-white flex items-center gap-2">
+                <DollarSign className="h-5 w-5" />
+                Cost Breakdown
+              </CardTitle>
+              <CardDescription className="text-slate-400">
+                Estimated API costs for this evaluation
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-slate-500 text-sm">Input Tokens</p>
+                  <p className="text-white font-semibold text-lg">{evaluation.cost.input_tokens.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-sm">Output Tokens</p>
+                  <p className="text-white font-semibold text-lg">{evaluation.cost.output_tokens.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-sm">Input Cost</p>
+                  <p className="text-white font-semibold text-lg">${evaluation.cost.input_cost.toFixed(6)}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-sm">Total Cost</p>
+                  <p className="text-blue-400 font-bold text-xl">${evaluation.cost.total_cost.toFixed(6)}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Criteria Scores */}
         <Card className="bg-slate-800/50 border-slate-700 mb-6">
@@ -239,6 +324,82 @@ export default function EvaluationDetail() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Rewrite Dialog */}
+      <Dialog open={showRewriteDialog} onOpenChange={setShowRewriteDialog}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-purple-500" />
+              AI-Rewritten Prompt
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Improved version based on evaluation feedback
+            </DialogDescription>
+          </DialogHeader>
+          
+          {rewriteResult && (
+            <div className="space-y-4">
+              {/* Rewritten Prompt */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold text-white">Improved Prompt</h3>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => copyToClipboard(rewriteResult.rewritten_prompt)}
+                    className="bg-slate-700 border-slate-600"
+                  >
+                    <Copy className="h-3 w-3 mr-2" />
+                    Copy
+                  </Button>
+                </div>
+                <Textarea
+                  value={rewriteResult.rewritten_prompt}
+                  readOnly
+                  className="min-h-[200px] bg-slate-900 border-slate-600 text-slate-200 font-mono text-sm"
+                />
+              </div>
+
+              {/* Changes Made */}
+              <div>
+                <h3 className="font-semibold text-white mb-2">Key Improvements</h3>
+                <ul className="space-y-2">
+                  {rewriteResult.changes_made?.map((change, i) => (
+                    <li key={i} className="flex gap-2 text-slate-300 text-sm">
+                      <span className="text-green-500">✓</span>
+                      <span>{change}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Rationale */}
+              {rewriteResult.rationale && (
+                <div>
+                  <h3 className="font-semibold text-white mb-2">Rationale</h3>
+                  <p className="text-slate-300 text-sm">{rewriteResult.rationale}</p>
+                </div>
+              )}
+
+              {/* Cost */}
+              {rewriteResult.cost && (
+                <Card className="bg-slate-900 border-slate-700">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm text-white">Rewrite Cost</CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-sm">
+                    <div className="flex justify-between text-slate-300">
+                      <span>Total Cost:</span>
+                      <span className="font-bold text-blue-400">${rewriteResult.cost.total_cost.toFixed(6)}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

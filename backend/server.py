@@ -80,6 +80,19 @@ class CompareRequest(BaseModel):
     evaluation_ids: List[str]
 
 
+class RewriteRequest(BaseModel):
+    prompt_text: str
+    evaluation_id: Optional[str] = None
+    focus_areas: Optional[List[str]] = None
+
+
+class PlaygroundRequest(BaseModel):
+    prompt_text: str
+    test_input: str
+    llm_provider: Optional[str] = None
+    model_name: Optional[str] = None
+
+
 # ============= Evaluation Prompt Template =============
 
 EVALUATION_SYSTEM_PROMPT = """You are a **senior prompt engineer** participating in the **Prompt Evaluation Chain**, a quality system built to enhance prompt design through systematic reviews and iterative feedback. Your task is to **analyze and score a given prompt** following a detailed rubric.
@@ -147,6 +160,76 @@ You will evaluate the prompt using the 35-criteria rubric below. For each criter
 Return ONLY the JSON object, no other text."""
 
 
+REWRITE_SYSTEM_PROMPT = """You are an expert prompt engineer. Your task is to rewrite and improve a prompt based on evaluation feedback and focus areas.
+
+Guidelines:
+1. Maintain the original intent and core purpose
+2. Address specific weaknesses identified in the evaluation
+3. Incorporate best practices for prompt engineering
+4. Make the prompt more clear, specific, and effective
+5. Add appropriate context, examples, or structure as needed
+
+Return a JSON object with this structure:
+{
+  "rewritten_prompt": "The improved version of the prompt...",
+  "changes_made": ["List of specific improvements", "Another improvement"],
+  "rationale": "Brief explanation of why these changes improve the prompt"
+}
+
+Return ONLY the JSON object, no other text."""
+
+
+# ============= Cost Calculation Constants =============
+
+# Pricing per 1M tokens (as of 2025)
+TOKEN_COSTS = {
+    "openai": {
+        "gpt-4o": {"input": 2.50, "output": 10.00},
+        "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+        "gpt-4-turbo": {"input": 10.00, "output": 30.00},
+    },
+    "claude": {
+        "claude-3-7-sonnet-20250219": {"input": 3.00, "output": 15.00},
+        "claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00},
+        "claude-3-opus-20240229": {"input": 15.00, "output": 75.00},
+        "claude-3-sonnet-20240229": {"input": 3.00, "output": 15.00},
+        "claude-3-haiku-20240307": {"input": 0.25, "output": 1.25},
+    },
+    "gemini": {
+        "gemini-2.0-flash-exp": {"input": 0.075, "output": 0.30},
+        "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
+        "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+    }
+}
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token estimation (1 token ≈ 4 characters)"""
+    return len(text) // 4
+
+
+def calculate_cost(prompt_text: str, response_text: str, provider: str, model: str) -> Dict[str, float]:
+    """Calculate estimated API cost"""
+    input_tokens = estimate_tokens(prompt_text) + 1000  # +1000 for system prompt
+    output_tokens = estimate_tokens(response_text)
+    
+    # Get pricing, default to gpt-4o if not found
+    pricing = TOKEN_COSTS.get(provider, {}).get(model, TOKEN_COSTS["openai"]["gpt-4o"])
+    
+    input_cost = (input_tokens / 1_000_000) * pricing["input"]
+    output_cost = (output_tokens / 1_000_000) * pricing["output"]
+    total_cost = input_cost + output_cost
+    
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "input_cost": round(input_cost, 6),
+        "output_cost": round(output_cost, 6),
+        "total_cost": round(total_cost, 6),
+        "currency": "USD"
+    }
+
+
 # ============= Helper Functions =============
 
 def prepare_for_mongo(data: dict) -> dict:
@@ -179,7 +262,7 @@ async def get_llm_evaluation(prompt_text: str, provider: str, api_key: str, mode
     
     try:
         if provider == "openai":
-            client = openai.AsyncOpenAI(api_key=api_key)
+            client = openai.AsyncOpenAI(api_key=api_key, timeout=120.0)  # 2 minute timeout
             response = await client.chat.completions.create(
                 model=model,
                 messages=[
@@ -191,14 +274,15 @@ async def get_llm_evaluation(prompt_text: str, provider: str, api_key: str, mode
             response_text = response.choices[0].message.content
             
         elif provider == "claude":
-            client = anthropic.AsyncAnthropic(api_key=api_key)
+            client = anthropic.AsyncAnthropic(api_key=api_key, timeout=120.0)  # 2 minute timeout
             response = await client.messages.create(
                 model=model,
                 max_tokens=4096,
                 system=EVALUATION_SYSTEM_PROMPT,
                 messages=[
                     {"role": "user", "content": user_prompt}
-                ]
+                ],
+                timeout=120.0  # 2 minute timeout
             )
             response_text = response.content[0].text
             
@@ -224,6 +308,11 @@ async def get_llm_evaluation(prompt_text: str, provider: str, api_key: str, mode
         response_text = response_text.strip()
         
         evaluation_data = json.loads(response_text)
+        
+        # Add cost calculation
+        cost_info = calculate_cost(user_prompt, response_text, provider, model)
+        evaluation_data["cost"] = cost_info
+        
         return evaluation_data
         
     except json.JSONDecodeError as e:
@@ -460,6 +549,176 @@ async def export_pdf(evaluation_id: str):
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=evaluation_{evaluation_id}.pdf"}
     )
+
+
+@api_router.post("/rewrite")
+async def rewrite_prompt(input: RewriteRequest):
+    """AI-powered prompt rewriting based on evaluation feedback"""
+    # Get settings
+    settings_doc = await db.settings.find_one()
+    if not settings_doc:
+        raise HTTPException(status_code=400, detail="Please configure LLM settings first")
+    
+    settings = Settings(**parse_from_mongo(settings_doc))
+    
+    # Get evaluation if ID provided
+    evaluation_feedback = ""
+    if input.evaluation_id:
+        evaluation = await db.evaluations.find_one({"id": input.evaluation_id})
+        if evaluation:
+            eval_obj = Evaluation(**parse_from_mongo(evaluation))
+            # Create feedback summary
+            low_scores = [cs for cs in eval_obj.criteria_scores if cs.score <= 2]
+            evaluation_feedback = f"\n\nEvaluation Feedback:\n"
+            evaluation_feedback += f"Total Score: {eval_obj.total_score}/175\n\n"
+            evaluation_feedback += "Low-scoring areas:\n"
+            for cs in low_scores[:5]:
+                evaluation_feedback += f"- {cs.criterion} (score: {cs.score}): {cs.improvement}\n"
+            evaluation_feedback += f"\n\nKey Suggestions:\n"
+            for i, suggestion in enumerate(eval_obj.refinement_suggestions[:5], 1):
+                evaluation_feedback += f"{i}. {suggestion}\n"
+    
+    # Add focus areas if provided
+    if input.focus_areas:
+        evaluation_feedback += f"\n\nFocus Areas: {', '.join(input.focus_areas)}"
+    
+    user_message = f"""Please rewrite and improve this prompt:
+
+Original Prompt:
+```
+{input.prompt_text}
+```
+{evaluation_feedback}
+"""
+    
+    try:
+        # Use configured LLM for rewriting
+        if settings.llm_provider == "openai":
+            client = openai.AsyncOpenAI(api_key=settings.api_key, timeout=120.0)  # 2 minute timeout
+            response = await client.chat.completions.create(
+                model=settings.model_name or "gpt-4o",
+                messages=[
+                    {"role": "system", "content": REWRITE_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=0.7
+            )
+            response_text = response.choices[0].message.content
+            
+        elif settings.llm_provider == "claude":
+            client = anthropic.AsyncAnthropic(api_key=settings.api_key, timeout=120.0)  # 2 minute timeout
+            response = await client.messages.create(
+                model=settings.model_name or "claude-3-7-sonnet-20250219",
+                max_tokens=4096,
+                system=REWRITE_SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": user_message}
+                ],
+                timeout=120.0  # 2 minute timeout
+            )
+            response_text = response.content[0].text
+            
+        elif settings.llm_provider == "gemini":
+            genai.configure(api_key=settings.api_key)
+            model_obj = genai.GenerativeModel(settings.model_name or "gemini-2.0-flash-exp")
+            response = await model_obj.generate_content_async(
+                f"{REWRITE_SYSTEM_PROMPT}\n\n{user_message}"
+            )
+            response_text = response.text
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported provider: {settings.llm_provider}")
+        
+        # Parse response
+        response_text = response_text.strip()
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+        
+        rewrite_data = json.loads(response_text)
+        
+        # Add cost calculation
+        cost_info = calculate_cost(user_message, response_text, settings.llm_provider, settings.model_name or "gpt-4o")
+        rewrite_data["cost"] = cost_info
+        
+        return rewrite_data
+        
+    except Exception as e:
+        logging.error(f"Rewrite error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Rewrite failed: {str(e)}")
+
+
+@api_router.post("/playground")
+async def test_prompt_in_playground(input: PlaygroundRequest):
+    """Test a prompt with sample input in a live playground"""
+    # Get settings or use provided provider
+    settings_doc = await db.settings.find_one()
+    if not settings_doc and not input.llm_provider:
+        raise HTTPException(status_code=400, detail="Please configure LLM settings or provide provider details")
+    
+    if settings_doc:
+        settings = Settings(**parse_from_mongo(settings_doc))
+        provider = input.llm_provider or settings.llm_provider
+        api_key = settings.api_key
+        model = input.model_name or settings.model_name or "gpt-4o"
+    else:
+        provider = input.llm_provider
+        api_key = None  # Would need to be provided
+        model = input.model_name or "gpt-4o"
+        raise HTTPException(status_code=400, detail="Please configure LLM settings first")
+    
+    # Execute the prompt with the test input
+    user_message = input.prompt_text.replace("{input}", input.test_input)
+    
+    try:
+        if provider == "openai":
+            client = openai.AsyncOpenAI(api_key=api_key, timeout=60.0)  # 1 minute timeout for playground
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=0.7
+            )
+            response_text = response.choices[0].message.content
+            
+        elif provider == "claude":
+            client = anthropic.AsyncAnthropic(api_key=api_key, timeout=60.0)  # 1 minute timeout for playground
+            response = await client.messages.create(
+                model=model,
+                max_tokens=4096,
+                messages=[
+                    {"role": "user", "content": user_message}
+                ],
+                timeout=60.0  # 1 minute timeout for playground
+            )
+            response_text = response.content[0].text
+            
+        elif provider == "gemini":
+            genai.configure(api_key=api_key)
+            model_obj = genai.GenerativeModel(model)
+            response = await model_obj.generate_content_async(user_message)
+            response_text = response.text
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
+        
+        # Calculate cost
+        cost_info = calculate_cost(user_message, response_text, provider, model)
+        
+        return {
+            "prompt_used": user_message,
+            "response": response_text,
+            "provider": provider,
+            "model": model,
+            "cost": cost_info
+        }
+        
+    except Exception as e:
+        logging.error(f"Playground error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Playground test failed: {str(e)}")
 
 
 # Include the router in the main app

@@ -9,7 +9,7 @@ import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { useNavigate } from "react-router-dom";
-import { Loader2, Settings, History, GitCompare, Download, CheckCircle, AlertCircle } from "lucide-react";
+import { Loader2, Settings, History, GitCompare, Download, CheckCircle, AlertCircle, Play, Sparkles, DollarSign, Copy, HelpCircle } from "lucide-react";
 import { useToast } from "../hooks/use-toast";
 import { Progress } from "../components/ui/progress";
 
@@ -22,6 +22,9 @@ export default function Dashboard() {
   const [apiKey, setApiKey] = useState("");
   const [modelName, setModelName] = useState("");
   const [latestEvaluation, setLatestEvaluation] = useState(null);
+  const [rewriting, setRewriting] = useState(false);
+  const [rewriteResult, setRewriteResult] = useState(null);
+  const [showRewriteDialog, setShowRewriteDialog] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -98,6 +101,8 @@ export default function Dashboard() {
     try {
       const response = await axios.post(`${API}/evaluate`, {
         prompt_text: promptText
+      }, {
+        timeout: 150000  // 2.5 minute timeout (150 seconds)
       });
       setLatestEvaluation(response.data);
       toast({
@@ -105,10 +110,14 @@ export default function Dashboard() {
         description: `Total Score: ${response.data.total_score}/175`
       });
     } catch (error) {
+      const errorMessage = error.code === 'ECONNABORTED' 
+        ? "Request timed out. The evaluation took too long. Try a shorter prompt or try again."
+        : error.response?.data?.detail || "An error occurred during evaluation";
+      
       toast({
         variant: "destructive",
         title: "Evaluation Failed",
-        description: error.response?.data?.detail || "An error occurred during evaluation"
+        description: errorMessage
       });
     } finally {
       setIsEvaluating(false);
@@ -129,6 +138,46 @@ export default function Dashboard() {
     return "Needs Improvement";
   };
 
+  const handleRewrite = async () => {
+    if (!latestEvaluation) return;
+    
+    setRewriting(true);
+    try {
+      const response = await axios.post(`${API}/rewrite`, {
+        prompt_text: promptText,
+        evaluation_id: latestEvaluation.id
+      }, {
+        timeout: 150000  // 2.5 minute timeout (150 seconds)
+      });
+      setRewriteResult(response.data);
+      setShowRewriteDialog(true);
+      toast({
+        title: "Prompt Rewritten!",
+        description: "AI has improved your prompt based on the evaluation"
+      });
+    } catch (error) {
+      const errorMessage = error.code === 'ECONNABORTED'
+        ? "Request timed out. The rewrite took too long. Try again."
+        : error.response?.data?.detail || "An error occurred";
+      
+      toast({
+        variant: "destructive",
+        title: "Rewrite Failed",
+        description: errorMessage
+      });
+    } finally {
+      setRewriting(false);
+    }
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Copied!",
+      description: "Text copied to clipboard"
+    });
+  };
+
   return (
     <div className="min-h-screen p-6">
       <div className="max-w-7xl mx-auto">
@@ -143,6 +192,15 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="flex gap-3">
+            <Button
+              variant="outline"
+              onClick={() => navigate("/playground")}
+              className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 border-0 text-white"
+              data-testid="playground-button"
+            >
+              <Play className="mr-2 h-4 w-4" />
+              Playground
+            </Button>
             <Button
               variant="outline"
               onClick={() => navigate("/history")}
@@ -160,6 +218,15 @@ export default function Dashboard() {
             >
               <GitCompare className="mr-2 h-4 w-4" />
               Compare
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => navigate("/help")}
+              className="bg-slate-800 border-slate-600 hover:bg-slate-700 text-white"
+              data-testid="help-button"
+            >
+              <HelpCircle className="mr-2 h-4 w-4" />
+              Help
             </Button>
             <Dialog open={showSettings} onOpenChange={setShowSettings}>
               <DialogTrigger asChild>
@@ -353,6 +420,17 @@ export default function Dashboard() {
                   {/* Action Buttons */}
                   <div className="flex gap-2">
                     <Button
+                      onClick={handleRewrite}
+                      disabled={rewriting}
+                      className="flex-1 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white"
+                    >
+                      {rewriting ? (
+                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Rewriting...</>
+                      ) : (
+                        <><Sparkles className="mr-2 h-4 w-4" /> AI Rewrite</>
+                      )}
+                    </Button>
+                    <Button
                       onClick={() => navigate(`/evaluation/${latestEvaluation.id}`)}
                       className="flex-1 bg-slate-700 hover:bg-slate-600 text-white"
                       data-testid="view-details-button"
@@ -402,6 +480,101 @@ export default function Dashboard() {
           </Card>
         </div>
       </div>
+
+      {/* Rewrite Dialog */}
+      <Dialog open={showRewriteDialog} onOpenChange={setShowRewriteDialog}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-purple-500" />
+              AI-Rewritten Prompt
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Improved version based on evaluation feedback
+            </DialogDescription>
+          </DialogHeader>
+          
+          {rewriteResult && (
+            <div className="space-y-4">
+              {/* Rewritten Prompt */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold text-white">Improved Prompt</h3>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => copyToClipboard(rewriteResult.rewritten_prompt)}
+                    className="bg-slate-700 border-slate-600"
+                  >
+                    <Copy className="h-3 w-3 mr-2" />
+                    Copy
+                  </Button>
+                </div>
+                <Textarea
+                  value={rewriteResult.rewritten_prompt}
+                  readOnly
+                  className="min-h-[200px] bg-slate-900 border-slate-600 text-slate-200 font-mono text-sm"
+                />
+              </div>
+
+              {/* Changes Made */}
+              <div>
+                <h3 className="font-semibold text-white mb-2">Key Improvements</h3>
+                <ul className="space-y-2">
+                  {rewriteResult.changes_made?.map((change, i) => (
+                    <li key={i} className="flex gap-2 text-slate-300 text-sm">
+                      <span className="text-green-500">✓</span>
+                      <span>{change}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Rationale */}
+              {rewriteResult.rationale && (
+                <div>
+                  <h3 className="font-semibold text-white mb-2">Rationale</h3>
+                  <p className="text-slate-300 text-sm">{rewriteResult.rationale}</p>
+                </div>
+              )}
+
+              {/* Cost */}
+              {rewriteResult.cost && (
+                <Card className="bg-slate-900 border-slate-700">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm text-white flex items-center gap-2">
+                      <DollarSign className="h-4 w-4" />
+                      Rewrite Cost
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-sm">
+                    <div className="flex justify-between text-slate-300">
+                      <span>Total Cost:</span>
+                      <span className="font-bold text-blue-400">${rewriteResult.cost.total_cost.toFixed(6)}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Use Rewritten Prompt Button */}
+              <Button
+                onClick={() => {
+                  setPromptText(rewriteResult.rewritten_prompt);
+                  setShowRewriteDialog(false);
+                  setLatestEvaluation(null);
+                  toast({
+                    title: "Prompt Updated!",
+                    description: "You can now evaluate the improved prompt"
+                  });
+                }}
+                className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white"
+              >
+                Use This Prompt
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

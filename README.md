@@ -19,6 +19,10 @@ Each prompt receives:
 - 💡 Strengths and improvement areas
 - 🎯 Actionable refinement suggestions
 - 📄 Exportable reports (PDF/JSON)
+- ✨ **AI-powered prompt rewriting** based on evaluation
+- 💰 **Cost calculator** showing estimated API costs
+- 🎮 **Prompt playground** for live testing
+- 🌓 **Dark/Light theme** toggle
 
 ## 🏗️ Architecture
 
@@ -313,6 +317,53 @@ cd frontend
 yarn start
 ```
 
+## 🎮 New Features
+
+### AI-Powered Prompt Rewriting
+After evaluating a prompt, click the "AI Rewrite" button to get an improved version based on the evaluation feedback. The rewrite considers:
+- Low-scoring criteria
+- Refinement suggestions
+- Best practices for prompt engineering
+
+### Cost Calculator
+Every API call now displays:
+- Input/output token counts
+- Cost per token type
+- Total estimated cost in USD
+
+Track your spending and optimize prompt efficiency!
+
+### Prompt Playground
+Test your prompts with live input before evaluation:
+1. Navigate to Playground from the dashboard
+2. Enter your prompt template (use `{input}` as placeholder)
+3. Provide test data
+4. See immediate results with cost breakdown
+
+### Dark/Light Theme
+Toggle between dark and light themes using the theme switcher in the top navigation.
+
+## 🧪 Testing
+
+### Backend Tests
+```bash
+cd backend
+source venv/bin/activate
+pytest tests/test_server.py -v
+```
+
+### Frontend Tests
+```bash
+cd frontend
+yarn test
+```
+
+Tests follow strict guidelines:
+- ✅ No mock data or hardcoded responses
+- ✅ Actual service layer integration
+- ✅ Proper database cleanup
+- ✅ Positive, negative, and edge case scenarios
+
 ## 📝 API Endpoints
 
 | Method | Endpoint | Description |
@@ -320,6 +371,8 @@ yarn start
 | GET | `/api/settings` | Get LLM configuration |
 | POST | `/api/settings` | Save LLM configuration |
 | POST | `/api/evaluate` | Evaluate a prompt |
+| POST | `/api/rewrite` | **NEW** - AI rewrite prompt |
+| POST | `/api/playground` | **NEW** - Test prompt with input |
 | GET | `/api/evaluations` | Get all evaluations |
 | GET | `/api/evaluations/{id}` | Get specific evaluation |
 | DELETE | `/api/evaluations/{id}` | Delete evaluation |
