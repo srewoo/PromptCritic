@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../components/ui/accordion";
-import { ArrowLeft, CheckCircle, Sparkles, Play, DollarSign, History, GitCompare, Settings, Download, AlertCircle, Lightbulb } from "lucide-react";
+import { ArrowLeft, CheckCircle, Sparkles, Play, DollarSign, History, GitCompare, Settings, Download, AlertCircle, Lightbulb, AlertTriangle, FileCode, Wand2, Zap, Target, Brain, Layers } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 
 export default function Help() {
@@ -61,7 +61,7 @@ export default function Help() {
                 <div>
                   <h3 className="text-white font-semibold mb-1">Enter Your Prompt</h3>
                   <p className="text-slate-300 text-sm">
-                    Type or paste your prompt in the text area. Be as detailed or concise as you need - the AI will evaluate it across 35 expert criteria.
+                    Type or paste your prompt in the text area. Be as detailed or concise as you need - the AI will evaluate it across 50 expert criteria.
                   </p>
                 </div>
               </div>
@@ -94,10 +94,10 @@ export default function Help() {
               <div className="bg-slate-900 p-4 rounded-lg border border-slate-700">
                 <div className="flex items-center gap-2 mb-2">
                   <CheckCircle className="h-5 w-5 text-blue-400" />
-                  <h3 className="text-white font-semibold">35-Criteria Evaluation</h3>
+                  <h3 className="text-white font-semibold">50-Criteria Evaluation</h3>
                 </div>
                 <p className="text-slate-300 text-sm">
-                  Comprehensive analysis including clarity, context, task definition, output format, ethical alignment, and 30 more dimensions.
+                  Comprehensive analysis across 7 categories including Core Fundamentals, Modern Best Practices, Provider Optimization, Advanced Techniques, Agentic Patterns, Context Management, and Safety & Reliability.
                 </p>
               </div>
 
@@ -155,6 +155,54 @@ export default function Help() {
                   Compare multiple prompts side-by-side to understand what works best.
                 </p>
               </div>
+
+              {/* Feature 7 - NEW */}
+              <div className="bg-slate-900 p-4 rounded-lg border border-slate-700">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertTriangle className="h-5 w-5 text-orange-400" />
+                  <h3 className="text-white font-semibold">Contradiction Detector</h3>
+                  <Badge className="bg-green-600 text-xs">New</Badge>
+                </div>
+                <p className="text-slate-300 text-sm">
+                  Detect conflicting instructions in your prompts. Critical for GPT-5 which is highly sensitive to contradictions.
+                </p>
+              </div>
+
+              {/* Feature 8 - NEW */}
+              <div className="bg-slate-900 p-4 rounded-lg border border-slate-700">
+                <div className="flex items-center gap-2 mb-2">
+                  <FileCode className="h-5 w-5 text-cyan-400" />
+                  <h3 className="text-white font-semibold">Delimiter Analyzer</h3>
+                  <Badge className="bg-green-600 text-xs">New</Badge>
+                </div>
+                <p className="text-slate-300 text-sm">
+                  Analyze and optimize your delimiter strategy (XML, Markdown, JSON) based on GPT-4.1 research.
+                </p>
+              </div>
+
+              {/* Feature 9 - NEW */}
+              <div className="bg-slate-900 p-4 rounded-lg border border-slate-700">
+                <div className="flex items-center gap-2 mb-2">
+                  <Wand2 className="h-5 w-5 text-pink-400" />
+                  <h3 className="text-white font-semibold">Metaprompt Generator</h3>
+                  <Badge className="bg-green-600 text-xs">New</Badge>
+                </div>
+                <p className="text-slate-300 text-sm">
+                  GPT-5 metaprompting: Get minimal edit suggestions to improve prompt behavior based on desired outcomes.
+                </p>
+              </div>
+
+              {/* Feature 10 - NEW */}
+              <div className="bg-slate-900 p-4 rounded-lg border border-slate-700">
+                <div className="flex items-center gap-2 mb-2">
+                  <Target className="h-5 w-5 text-blue-400" />
+                  <h3 className="text-white font-semibold">5 Evaluation Modes</h3>
+                  <Badge className="bg-green-600 text-xs">New</Badge>
+                </div>
+                <p className="text-slate-300 text-sm">
+                  Choose from Quick (10 criteria), Standard (50), Deep, Agentic, or Long Context modes for tailored analysis.
+                </p>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -180,9 +228,9 @@ export default function Help() {
                     <li>Enter or paste your prompt in the text area</li>
                     <li>Click the <strong>"Evaluate Prompt"</strong> button</li>
                     <li>Wait for the AI analysis (usually takes 5-15 seconds)</li>
-                    <li>Review your score out of 175 points</li>
+                    <li>Review your score out of 250 points</li>
                     <li>Read the top refinement suggestions</li>
-                    <li>Click <strong>"View Full Details"</strong> to see all 35 criteria scores</li>
+                    <li>Click <strong>"View Full Details"</strong> to see all 50 criteria scores</li>
                   </ol>
                   <div className="bg-blue-900/20 border border-blue-700 p-3 rounded-lg mt-3">
                     <p className="text-blue-300 text-sm">
@@ -296,6 +344,146 @@ export default function Help() {
                   </div>
                 </AccordionContent>
               </AccordionItem>
+
+              {/* Guide 7 - NEW */}
+              <AccordionItem value="item-7" className="bg-slate-900 border border-slate-700 rounded-lg px-4">
+                <AccordionTrigger className="hover:no-underline">
+                  <span className="text-white font-medium flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-yellow-500" />
+                    Choosing an Evaluation Mode
+                    <Badge className="bg-green-600 text-xs">New</Badge>
+                  </span>
+                </AccordionTrigger>
+                <AccordionContent className="text-slate-300 space-y-3 pt-2">
+                  <p>Select the right evaluation depth for your needs:</p>
+                  <div className="space-y-3">
+                    <div className="bg-slate-800 p-3 rounded-lg">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Zap className="h-4 w-4 text-yellow-500" />
+                        <strong className="text-white">Quick Scan (10 criteria, ~30s)</strong>
+                      </div>
+                      <p className="text-sm">Fast feedback for rapid iteration. Best for: initial drafts, quick checks, testing variations.</p>
+                    </div>
+                    <div className="bg-slate-800 p-3 rounded-lg">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Target className="h-4 w-4 text-blue-500" />
+                        <strong className="text-white">Standard (50 criteria, ~60s) - Default</strong>
+                      </div>
+                      <p className="text-sm">Comprehensive analysis across all categories. Best for: general prompts, balanced evaluation, most use cases.</p>
+                    </div>
+                    <div className="bg-slate-800 p-3 rounded-lg">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Brain className="h-4 w-4 text-purple-500" />
+                        <strong className="text-white">Deep Analysis (50+ criteria, ~90s)</strong>
+                      </div>
+                      <p className="text-sm">Includes semantic coherence, edge cases, scalability analysis. Best for: production prompts, critical applications.</p>
+                    </div>
+                    <div className="bg-slate-800 p-3 rounded-lg">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Layers className="h-4 w-4 text-green-500" />
+                        <strong className="text-white">Agentic Workflow (50 criteria, ~60s)</strong>
+                      </div>
+                      <p className="text-sm">Focus on tool use, planning, multi-step reasoning. Best for: agent systems, function calling, complex workflows.</p>
+                    </div>
+                    <div className="bg-slate-800 p-3 rounded-lg">
+                      <div className="flex items-center gap-2 mb-1">
+                        <FileCode className="h-4 w-4 text-indigo-500" />
+                        <strong className="text-white">Long Context (50 criteria, ~60s)</strong>
+                      </div>
+                      <p className="text-sm">Optimized for 50K+ tokens, document processing, RAG systems. Best for: large documents, retrieval applications.</p>
+                    </div>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Guide 8 - NEW */}
+              <AccordionItem value="item-8" className="bg-slate-900 border border-slate-700 rounded-lg px-4">
+                <AccordionTrigger className="hover:no-underline">
+                  <span className="text-white font-medium flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-orange-500" />
+                    Using the Contradiction Detector
+                    <Badge className="bg-green-600 text-xs">New</Badge>
+                  </span>
+                </AccordionTrigger>
+                <AccordionContent className="text-slate-300 space-y-2 pt-2">
+                  <p>Detect conflicting instructions that confuse modern LLMs like GPT-5:</p>
+                  <ol className="list-decimal list-inside space-y-2 mt-2">
+                    <li>Click the <strong className="text-orange-400">"Contradictions"</strong> button from the dashboard</li>
+                    <li>Paste your prompt in the text area</li>
+                    <li>Click <strong>"Detect Contradictions"</strong></li>
+                    <li>Review detected contradictions with severity ratings (High/Medium/Low)</li>
+                    <li>See which instructions conflict with each other</li>
+                    <li>Apply suggested fixes to resolve contradictions</li>
+                  </ol>
+                  <div className="bg-orange-900/20 border border-orange-700 p-3 rounded-lg mt-3">
+                    <p className="text-orange-300 text-sm">
+                      <strong>Why it matters:</strong> GPT-5 is highly sensitive to contradictory instructions. Even subtle conflicts can cause unpredictable behavior.
+                    </p>
+                  </div>
+                  <div className="bg-slate-800 p-3 rounded-lg mt-2">
+                    <p className="text-sm mb-1"><strong className="text-white">Example Contradiction:</strong></p>
+                    <p className="text-xs text-red-400">"Be concise" vs "Provide detailed explanations"</p>
+                    <p className="text-xs text-green-400 mt-1">✓ Fix: "Be concise but thorough in key areas"</p>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Guide 9 - NEW */}
+              <AccordionItem value="item-9" className="bg-slate-900 border border-slate-700 rounded-lg px-4">
+                <AccordionTrigger className="hover:no-underline">
+                  <span className="text-white font-medium flex items-center gap-2">
+                    <FileCode className="h-4 w-4 text-cyan-500" />
+                    Using the Delimiter Analyzer
+                    <Badge className="bg-green-600 text-xs">New</Badge>
+                  </span>
+                </AccordionTrigger>
+                <AccordionContent className="text-slate-300 space-y-2 pt-2">
+                  <p>Optimize your delimiter strategy based on GPT-4.1 research:</p>
+                  <ol className="list-decimal list-inside space-y-2 mt-2">
+                    <li>Click the <strong className="text-cyan-400">"Delimiters"</strong> button from the dashboard</li>
+                    <li>Paste your prompt</li>
+                    <li>Click <strong>"Analyze Delimiters"</strong></li>
+                    <li>See your current strategy (XML, Markdown, JSON, or Mixed)</li>
+                    <li>Review quality score (1-5 stars)</li>
+                    <li>Read strengths and weaknesses</li>
+                    <li>View recommended format with examples</li>
+                  </ol>
+                  <div className="bg-cyan-900/20 border border-cyan-700 p-3 rounded-lg mt-3">
+                    <p className="text-cyan-300 text-sm">
+                      <strong>Best Practices:</strong> XML tags work best for Claude, Markdown for general use, Pipe format (ID: X | TITLE: Y) for long context.
+                    </p>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Guide 10 - NEW */}
+              <AccordionItem value="item-10" className="bg-slate-900 border border-slate-700 rounded-lg px-4">
+                <AccordionTrigger className="hover:no-underline">
+                  <span className="text-white font-medium flex items-center gap-2">
+                    <Wand2 className="h-4 w-4 text-pink-500" />
+                    Using the Metaprompt Generator
+                    <Badge className="bg-green-600 text-xs">New</Badge>
+                  </span>
+                </AccordionTrigger>
+                <AccordionContent className="text-slate-300 space-y-2 pt-2">
+                  <p>Get AI-powered suggestions for minimal prompt improvements:</p>
+                  <ol className="list-decimal list-inside space-y-2 mt-2">
+                    <li>Click the <strong className="text-pink-400">"Metaprompt"</strong> button from the dashboard</li>
+                    <li>Enter your current prompt</li>
+                    <li>Describe the <strong>desired behavior</strong> you want</li>
+                    <li>Describe the <strong>current undesired behavior</strong></li>
+                    <li>Click <strong>"Generate Improvements"</strong></li>
+                    <li>Review suggested minimal edits with rationale</li>
+                    <li>See the full improved prompt</li>
+                    <li>Copy and test the improvements</li>
+                  </ol>
+                  <div className="bg-pink-900/20 border border-pink-700 p-3 rounded-lg mt-3">
+                    <p className="text-pink-300 text-sm">
+                      <strong>GPT-5 Metaprompting:</strong> This uses GPT-5's ability to suggest minimal, targeted edits rather than complete rewrites. More precise than traditional rewriting.
+                    </p>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
             </Accordion>
           </CardContent>
         </Card>
@@ -309,7 +497,7 @@ export default function Help() {
             <Accordion type="single" collapsible className="space-y-2">
               <AccordionItem value="faq-1" className="bg-slate-900 border border-slate-700 rounded-lg px-4">
                 <AccordionTrigger className="hover:no-underline">
-                  <span className="text-white">What are the 35 criteria?</span>
+                  <span className="text-white">What are the 50 criteria?</span>
                 </AccordionTrigger>
                 <AccordionContent className="text-slate-300">
                   <p className="mb-2">The evaluation covers:</p>

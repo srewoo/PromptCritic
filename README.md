@@ -1,25 +1,30 @@
 # PromptCritic 🎯
 
-An AI-powered prompt evaluation tool that analyzes and scores prompts using a comprehensive 35-criteria rubric. Get actionable insights to improve your prompts with professional-grade evaluation powered by OpenAI, Claude, or Gemini.
+An AI-powered prompt evaluation tool that analyzes and scores prompts using a comprehensive **50-criteria rubric** based on the latest GPT-5, GPT-4.1, and Claude 3.7 best practices. Get actionable insights to improve your prompts with professional-grade evaluation powered by OpenAI, Claude, or Gemini.
 
 ## 📋 Overview
 
-PromptCritic evaluates prompts across 35 expert criteria including:
-- Clarity & Specificity
-- Context & Task Definition
-- Output Format Requirements
-- Role/Persona Usage
-- Hallucination Minimization
-- Ethical Alignment
-- And 29 more dimensions...
+PromptCritic evaluates prompts across **50 expert criteria** organized into 7 categories:
+
+**Core Fundamentals** - Clarity, context, task definition  
+**Modern Best Practices** - Delimiters, reasoning strategies, verbosity  
+**Provider Optimization** - OpenAI, Claude, Gemini-specific patterns  
+**Advanced Techniques** - Examples, hallucination prevention, style  
+**Agentic Patterns** - Workflow design, tool use, planning  
+**Context Management** - Long context, document formatting  
+**Safety & Reliability** - Ethics, error handling, validation
 
 Each prompt receives:
-- ✅ Total score out of 175 points
-- 📊 Individual criterion scores (1-5 scale)
-- 💡 Strengths and improvement areas
-- 🎯 Actionable refinement suggestions
+- ✅ Total score out of **250 points** (50 criteria × 5)
+- 📊 **Category scores** across 7 dimensions
+- 🎯 **Provider-specific scores** (OpenAI, Claude, Gemini optimization)
+- ⚠️ **Contradiction detection** (GPT-5 best practice)
+- 📐 **Delimiter analysis** (XML, Markdown, structure)
+- 🔄 **Metaprompt generation** (self-improvement suggestions)
+- 💡 Strengths and improvement areas per criterion
+- 🎯 10-15 actionable refinement suggestions
 - 📄 Exportable reports (PDF/JSON)
-- ✨ **AI-powered prompt rewriting** based on evaluation
+- ✨ **AI-powered prompt rewriting** with provider optimization
 - 💰 **Cost calculator** showing estimated API costs
 - 🎮 **Prompt playground** for live testing
 - 🌓 **Dark/Light theme** toggle
@@ -366,17 +371,33 @@ Tests follow strict guidelines:
 
 ## 📝 API Endpoints
 
+### Core Evaluation
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/settings` | Get LLM configuration |
-| POST | `/api/settings` | Save LLM configuration |
-| POST | `/api/evaluate` | Evaluate a prompt |
-| POST | `/api/rewrite` | **NEW** - AI rewrite prompt |
-| POST | `/api/playground` | **NEW** - Test prompt with input |
+| POST | `/api/evaluate` | **Enhanced** - 50-criteria evaluation with categories |
 | GET | `/api/evaluations` | Get all evaluations |
 | GET | `/api/evaluations/{id}` | Get specific evaluation |
 | DELETE | `/api/evaluations/{id}` | Delete evaluation |
 | POST | `/api/compare` | Compare evaluations |
+
+### Advanced Analysis (Phase 1 🆕)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/detect-contradictions` | **NEW** - Detect conflicting instructions |
+| POST | `/api/analyze-delimiters` | **NEW** - Analyze delimiter strategy |
+| POST | `/api/generate-metaprompt` | **NEW** - Generate improvement suggestions |
+
+### Prompt Tools
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/rewrite` | **Enhanced** - AI rewrite with provider optimization |
+| POST | `/api/playground` | Test prompt with live input |
+
+### Configuration & Export
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/settings` | Get LLM configuration |
+| POST | `/api/settings` | Save LLM configuration |
 | GET | `/api/export/json/{id}` | Export as JSON |
 | GET | `/api/export/pdf/{id}` | Export as PDF |
 

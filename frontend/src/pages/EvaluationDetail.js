@@ -11,6 +11,9 @@ import { Progress } from "../components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../components/ui/accordion";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { Textarea } from "../components/ui/textarea";
+import CategoryScoreCard from "../components/CategoryScoreCard";
+import ProviderScoreCard from "../components/ProviderScoreCard";
+import ContradictionAlert from "../components/ContradictionAlert";
 
 export default function EvaluationDetail() {
   const { id } = useParams();
@@ -175,22 +178,48 @@ export default function EvaluationDetail() {
               <div>
                 <p className="text-6xl font-bold text-blue-400">
                   {evaluation.total_score}
-                  <span className="text-3xl text-slate-500">/175</span>
+                  <span className="text-3xl text-slate-500">/{evaluation.max_score || 250}</span>
                 </p>
                 <p className="text-slate-400 mt-2">
-                  {Math.round((evaluation.total_score / 175) * 100)}% Quality Score
+                  {Math.round((evaluation.total_score / (evaluation.max_score || 250)) * 100)}% Quality Score
                 </p>
+                {evaluation.evaluation_mode && evaluation.evaluation_mode !== 'standard' && (
+                  <Badge variant="outline" className="mt-2">
+                    {evaluation.evaluation_mode.toUpperCase()} MODE
+                  </Badge>
+                )}
               </div>
               <div className="text-right">
                 <p className="text-slate-400 text-sm mb-2">Performance</p>
                 <Progress
-                  value={(evaluation.total_score / 175) * 100}
+                  value={(evaluation.total_score / (evaluation.max_score || 250)) * 100}
                   className="h-4 w-48 bg-slate-700"
                 />
               </div>
             </div>
           </CardContent>
         </Card>
+
+        {/* Contradiction Alert */}
+        {evaluation.contradiction_analysis && (
+          <div className="mb-6">
+            <ContradictionAlert contradictionAnalysis={evaluation.contradiction_analysis} />
+          </div>
+        )}
+
+        {/* Category Scores */}
+        {evaluation.category_scores && evaluation.category_scores.length > 0 && (
+          <div className="mb-6">
+            <CategoryScoreCard categoryScores={evaluation.category_scores} />
+          </div>
+        )}
+
+        {/* Provider Scores */}
+        {evaluation.provider_scores && evaluation.provider_scores.length > 0 && (
+          <div className="mb-6">
+            <ProviderScoreCard providerScores={evaluation.provider_scores} />
+          </div>
+        )}
 
         {/* Original Prompt */}
         <Card className="bg-slate-800/50 border-slate-700 mb-6">
@@ -246,7 +275,7 @@ export default function EvaluationDetail() {
           <CardHeader>
             <CardTitle className="text-white">Detailed Criteria Analysis</CardTitle>
             <CardDescription className="text-slate-400">
-              35 expert criteria evaluated
+              50 expert criteria evaluated across 7 categories
             </CardDescription>
           </CardHeader>
           <CardContent>
