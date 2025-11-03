@@ -131,7 +131,7 @@ const DelimiterAnalyzer = () => {
               </Card>
 
               {/* Strengths */}
-              {result.strengths && result.strengths.length > 0 && (
+              {Array.isArray(result.strengths) && result.strengths.length > 0 && (
                 <Card className="border-green-200 dark:border-green-800">
                   <CardHeader>
                     <CardTitle className="text-sm flex items-center gap-2">
@@ -144,7 +144,7 @@ const DelimiterAnalyzer = () => {
                       {result.strengths.map((strength, index) => (
                         <li key={index} className="text-sm text-muted-foreground pl-5 relative">
                           <span className="absolute left-0">•</span>
-                          {strength}
+                          {typeof strength === 'string' ? strength : JSON.stringify(strength)}
                         </li>
                       ))}
                     </ul>
@@ -153,7 +153,7 @@ const DelimiterAnalyzer = () => {
               )}
 
               {/* Weaknesses */}
-              {result.weaknesses && result.weaknesses.length > 0 && (
+              {Array.isArray(result.weaknesses) && result.weaknesses.length > 0 && (
                 <Card className="border-yellow-200 dark:border-yellow-800">
                   <CardHeader>
                     <CardTitle className="text-sm flex items-center gap-2">
@@ -166,7 +166,7 @@ const DelimiterAnalyzer = () => {
                       {result.weaknesses.map((weakness, index) => (
                         <li key={index} className="text-sm text-muted-foreground pl-5 relative">
                           <span className="absolute left-0">•</span>
-                          {weakness}
+                          {typeof weakness === 'string' ? weakness : JSON.stringify(weakness)}
                         </li>
                       ))}
                     </ul>
@@ -175,7 +175,7 @@ const DelimiterAnalyzer = () => {
               )}
 
               {/* Recommendations */}
-              {result.recommendations && result.recommendations.length > 0 && (
+              {Array.isArray(result.recommendations) && result.recommendations.length > 0 && (
                 <Card className="border-blue-200 dark:border-blue-800">
                   <CardHeader>
                     <CardTitle className="text-sm flex items-center gap-2">
@@ -188,7 +188,7 @@ const DelimiterAnalyzer = () => {
                       {result.recommendations.map((rec, index) => (
                         <li key={index} className="text-sm text-muted-foreground pl-5 relative">
                           <span className="absolute left-0">•</span>
-                          {rec}
+                          {typeof rec === 'string' ? rec : JSON.stringify(rec)}
                         </li>
                       ))}
                     </ul>
@@ -203,15 +203,36 @@ const DelimiterAnalyzer = () => {
                     <CardTitle className="text-sm">Example Improvement</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <pre className="text-xs bg-muted p-3 rounded overflow-x-auto">
-                      {result.example_improvement}
-                    </pre>
+                    {typeof result.example_improvement === 'string' ? (
+                      <pre className="text-xs bg-muted p-3 rounded overflow-x-auto">
+                        {result.example_improvement}
+                      </pre>
+                    ) : result.example_improvement.before && result.example_improvement.after ? (
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-xs font-semibold mb-1 text-red-600">Before:</p>
+                          <pre className="text-xs bg-muted p-3 rounded overflow-x-auto border-l-2 border-red-500">
+                            {result.example_improvement.before}
+                          </pre>
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold mb-1 text-green-600">After:</p>
+                          <pre className="text-xs bg-muted p-3 rounded overflow-x-auto border-l-2 border-green-500">
+                            {result.example_improvement.after}
+                          </pre>
+                        </div>
+                      </div>
+                    ) : (
+                      <pre className="text-xs bg-muted p-3 rounded overflow-x-auto">
+                        {JSON.stringify(result.example_improvement, null, 2)}
+                      </pre>
+                    )}
                   </CardContent>
                 </Card>
               )}
 
               {/* Cost */}
-              {result.cost && (
+              {result.cost && typeof result.cost.total_cost === 'number' && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-sm">Analysis Cost</CardTitle>
