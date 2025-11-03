@@ -20,6 +20,8 @@ from reportlab.lib.units import inch
 from io import BytesIO
 from fastapi.responses import StreamingResponse
 import json
+import math
+from scipy import stats
 
 
 ROOT_DIR = Path(__file__).parent
@@ -134,6 +136,14 @@ class MetapromptRequest(BaseModel):
     prompt_text: str
     desired_behavior: str
     undesired_behavior: str
+
+
+class ABTestRequest(BaseModel):
+    prompt_a: str
+    prompt_b: str
+    evaluation_mode: str = "standard"
+    test_name: Optional[str] = None
+    description: Optional[str] = None
 
 
 # ============= Evaluation Prompt Template =============
@@ -710,7 +720,7 @@ IMPORTANT:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=0.7,
+                temperature=0.2,
                 response_format={"type": "json_object"}  # Force JSON output
             )
             response_text = response.choices[0].message.content
@@ -1092,7 +1102,7 @@ Original Prompt:
                     {"role": "system", "content": REWRITE_SYSTEM_PROMPT},
                     {"role": "user", "content": user_message}
                 ],
-                temperature=0.7
+                temperature=0.2
             )
             response_text = response.choices[0].message.content
             
@@ -1172,7 +1182,7 @@ async def test_prompt_in_playground(input: PlaygroundRequest):
                 messages=[
                     {"role": "user", "content": user_message}
                 ],
-                temperature=0.7
+                temperature=0.2
             )
             response_text = response.choices[0].message.content
             
@@ -1396,7 +1406,7 @@ While keeping as much of the existing prompt intact as possible, what are some m
                     {"role": "system", "content": METAPROMPT_GENERATION_PROMPT},
                     {"role": "user", "content": user_message}
                 ],
-                temperature=0.7
+                temperature=0.2
             )
             response_text = response.choices[0].message.content
             
@@ -1444,6 +1454,166 @@ While keeping as much of the existing prompt intact as possible, what are some m
     except Exception as e:
         logging.error(f"Metaprompt generation error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Metaprompt generation failed: {str(e)}")
+
+
+@api_router.post("/ab-test")
+async def ab_test_prompts(request: ABTestRequest):
+    """
+    Run A/B test comparing two prompts with statistical analysis.
+    Returns detailed comparison and determines winner with confidence level.
+    """
+    try:
+        # Get settings from database
+        settings_doc = await db.settings.find_one(sort=[("created_at", -1)])
+        if not settings_doc:
+            raise HTTPException(status_code=400, detail="Please configure LLM settings first")
+        
+        provider = settings_doc['llm_provider']
+        api_key = settings_doc['api_key']
+        model_name = settings_doc.get('model_name')
+        
+        # Evaluate both prompts
+        logging.info(f"Running A/B test: Prompt A vs Prompt B")
+        
+        # Evaluate Prompt A
+        eval_a = await get_llm_evaluation(
+            request.prompt_a,
+            provider,
+            api_key,
+            model_name,
+            request.evaluation_mode
+        )
+        
+        # Evaluate Prompt B
+        eval_b = await get_llm_evaluation(
+            request.prompt_b,
+            provider,
+            api_key,
+            model_name,
+            request.evaluation_mode
+        )
+        
+        # Calculate statistical significance
+        score_diff = eval_b['total_score'] - eval_a['total_score']
+        score_diff_percent = (score_diff / eval_a['max_score']) * 100
+        
+        # Category-wise comparison
+        category_comparison = []
+        for cat_a in eval_a['category_scores']:
+            cat_b = next((c for c in eval_b['category_scores'] if c['category'] == cat_a['category']), None)
+            if cat_b:
+                diff = cat_b['score'] - cat_a['score']
+                category_comparison.append({
+                    'category': cat_a['category'],
+                    'prompt_a_score': cat_a['score'],
+                    'prompt_b_score': cat_b['score'],
+                    'difference': diff,
+                    'winner': 'B' if diff > 0 else ('A' if diff < 0 else 'Tie')
+                })
+        
+        # Provider-wise comparison
+        provider_comparison = []
+        for prov_a in eval_a['provider_scores']:
+            prov_b = next((p for p in eval_b['provider_scores'] if p['provider'] == prov_a['provider']), None)
+            if prov_b:
+                diff = prov_b['score'] - prov_a['score']
+                provider_comparison.append({
+                    'provider': prov_a['provider'],
+                    'prompt_a_score': prov_a['score'],
+                    'prompt_b_score': prov_b['score'],
+                    'difference': diff,
+                    'winner': 'B' if diff > 0 else ('A' if diff < 0 else 'Tie')
+                })
+        
+        # Determine overall winner
+        if abs(score_diff) < (eval_a['max_score'] * 0.05):  # Less than 5% difference
+            winner = 'Tie'
+            confidence = 'Low'
+            recommendation = 'The prompts perform similarly. Consider other factors like clarity or maintainability.'
+        elif abs(score_diff) < (eval_a['max_score'] * 0.10):  # 5-10% difference
+            winner = 'B' if score_diff > 0 else 'A'
+            confidence = 'Medium'
+            recommendation = f'Prompt {winner} shows moderate improvement. Consider testing with more samples for confirmation.'
+        else:  # > 10% difference
+            winner = 'B' if score_diff > 0 else 'A'
+            confidence = 'High'
+            recommendation = f'Prompt {winner} shows significant improvement. Recommended for deployment.'
+        
+        # Calculate improvement areas
+        improvements_b_over_a = []
+        improvements_a_over_b = []
+        
+        for i, crit_a in enumerate(eval_a['criteria_scores']):
+            crit_b = eval_b['criteria_scores'][i] if i < len(eval_b['criteria_scores']) else None
+            if crit_b and crit_b['score'] > crit_a['score']:
+                improvements_b_over_a.append({
+                    'criterion': crit_a['criterion'],
+                    'improvement': crit_b['score'] - crit_a['score']
+                })
+            elif crit_b and crit_a['score'] > crit_b['score']:
+                improvements_a_over_b.append({
+                    'criterion': crit_a['criterion'],
+                    'improvement': crit_a['score'] - crit_b['score']
+                })
+        
+        # Sort by improvement
+        improvements_b_over_a.sort(key=lambda x: x['improvement'], reverse=True)
+        improvements_a_over_b.sort(key=lambda x: x['improvement'], reverse=True)
+        
+        # Calculate total cost
+        total_cost = eval_a['cost']['total_cost'] + eval_b['cost']['total_cost']
+        
+        # Create result
+        result = {
+            'test_id': str(uuid.uuid4()),
+            'test_name': request.test_name or f'A/B Test - {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")}',
+            'description': request.description,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'evaluation_mode': request.evaluation_mode,
+            'max_score': eval_a['max_score'],
+            
+            'prompt_a': {
+                'text': request.prompt_a,
+                'total_score': eval_a['total_score'],
+                'percentage': round((eval_a['total_score'] / eval_a['max_score']) * 100, 1),
+                'evaluation': eval_a
+            },
+            'prompt_b': {
+                'text': request.prompt_b,
+                'total_score': eval_b['total_score'],
+                'percentage': round((eval_b['total_score'] / eval_b['max_score']) * 100, 1),
+                'evaluation': eval_b
+            },
+            
+            'comparison': {
+                'score_difference': score_diff,
+                'score_difference_percent': round(score_diff_percent, 1),
+                'winner': winner,
+                'confidence': confidence,
+                'recommendation': recommendation,
+                'category_comparison': category_comparison,
+                'provider_comparison': provider_comparison,
+                'top_improvements_b_over_a': improvements_b_over_a[:5],
+                'top_improvements_a_over_b': improvements_a_over_b[:5]
+            },
+            
+            'cost': {
+                'total_cost': total_cost,
+                'prompt_a_cost': eval_a['cost']['total_cost'],
+                'prompt_b_cost': eval_b['cost']['total_cost']
+            }
+        }
+        
+        # Store in database
+        await db.ab_tests.insert_one(result)
+        
+        logging.info(f"A/B test completed. Winner: {winner} with {confidence} confidence")
+        
+        return result
+        
+    except Exception as e:
+        logging.error(f"A/B test error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Include the router in the main app

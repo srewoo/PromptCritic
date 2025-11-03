@@ -264,6 +264,15 @@ export default function Dashboard() {
             </Button>
             <Button
               variant="outline"
+              onClick={() => navigate("/ab-testing")}
+              className="bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 hover:scale-105 transition-all duration-200 border-0 text-white shadow-lg hover:shadow-emerald-500/50"
+              data-testid="ab-test-button"
+            >
+              <GitCompare className="mr-2 h-4 w-4" />
+              A/B Test
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => navigate("/help")}
               className="bg-slate-800/80 border-slate-600 hover:bg-slate-700 hover:scale-105 transition-all duration-200 text-white backdrop-blur-sm"
               data-testid="help-button"

@@ -8,6 +8,7 @@ import Help from "./pages/Help";
 import ContradictionDetector from "./pages/ContradictionDetector";
 import DelimiterAnalyzer from "./pages/DelimiterAnalyzer";
 import MetapromptGenerator from "./pages/MetapromptGenerator";
+import ABTesting from "./pages/ABTesting";
 import { Toaster } from "./components/ui/toaster";
 import { ThemeProvider } from "./components/theme-provider";
 import "./App.css";
@@ -28,6 +29,7 @@ function App() {
             <Route path="/contradiction-detector" element={<ContradictionDetector />} />
             <Route path="/delimiter-analyzer" element={<DelimiterAnalyzer />} />
             <Route path="/metaprompt-generator" element={<MetapromptGenerator />} />
+            <Route path="/ab-testing" element={<ABTesting />} />
             <Route path="/help" element={<Help />} />
             <Route path="/evaluation/:id" element={<EvaluationDetail />} />
             <Route path="*" element={<Navigate to="/" replace />} />
