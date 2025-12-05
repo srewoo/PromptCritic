@@ -8,7 +8,7 @@ const ThemeProviderContext = createContext({
 export function ThemeProvider({
   children,
   defaultTheme = "system",
-  storageKey = "promptcritic-theme",
+  storageKey = "athena-theme",
   ...props
 }) {
   const [theme, setTheme] = useState(

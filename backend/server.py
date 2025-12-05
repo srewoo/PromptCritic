@@ -1,13 +1,27 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
+from cache import get_cache_manager
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from websocket_manager import get_connection_manager
+from scoring_engine import get_scoring_engine, UseCaseProfile
+from prompt_versioning import get_version_control
+from auto_optimizer import get_auto_optimizer
+from chain_orchestrator import get_orchestrator, ExecutionMode
+from adversarial_tester import get_adversarial_tester
+from cost_optimizer import get_cost_optimizer
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import uuid
+
+# Import project API router
+import project_api
 from datetime import datetime, timezone
 import openai
 import anthropic
@@ -32,8 +46,13 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address, default_limits=["100/hour"])
+
 # Create the main app without a prefix
 app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -99,19 +118,23 @@ class Evaluation(BaseModel):
     provider_scores: Optional[List[ProviderScore]] = None
     contradiction_analysis: Optional[ContradictionDetection] = None
     evaluation_mode: Optional[str] = "standard"  # "quick", "standard", "deep", "agentic", "long_context"
+    use_case: Optional[str] = "general"  # Use case profile for weighted scoring
+    weighted_analysis: Optional[Dict[str, Any]] = None  # Weighted scoring analysis
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class EvaluateRequest(BaseModel):
     prompt_text: str
     evaluation_mode: Optional[str] = "standard"  # "quick", "standard", "deep", "agentic", "long_context"
+    use_case: Optional[str] = "general"  # "code_generation", "creative_writing", "data_analysis", etc.
 
 
 class CompareRequest(BaseModel):
     evaluation_ids: List[str]
 
 
-class RewriteRequest(BaseModel):
+class LegacyRewriteRequest(BaseModel):
+    """Legacy rewrite request for standalone evaluation flow"""
     prompt_text: str
     evaluation_id: Optional[str] = None
     focus_areas: Optional[List[str]] = None
@@ -207,7 +230,7 @@ Your task is to evaluate prompts using a comprehensive 50-criteria rubric based 
 ### Category 5: Agentic Patterns (36-40)
 36. Agentic Workflow Design - Planning and execution
 37. Tool Use Specification - Function calling clarity
-38. System Prompt Reminders - Critical instruction reinforcement
+38. Execution Feedback Loops - Result validation and adjustment
 39. Planning-Induced Reasoning - Strategic thinking
 40. Parallel Tool Safety - Concurrent operation handling
 
@@ -232,6 +255,13 @@ Your task is to evaluate prompts using a comprehensive 50-criteria rubric based 
 - 2 (Poor): Significant problems, major improvements needed
 - 1 (Very Poor): Critical issues, fundamental redesign required
 
+**IMPORTANT SCORING RULES**:
+- For criteria scored 5/5: Set "improvement" to "None needed - exemplary" or similar positive message
+- For criteria scored 4/5: Provide specific, actionable minor improvements
+- For criteria scored 3 or below: Provide detailed improvement suggestions
+- "refinement_suggestions" should ONLY include actionable improvements for criteria scored 4 or below
+- If total score is 240+ (96%+), keep refinement_suggestions minimal and focused
+
 **IMPORTANT**: Return a valid JSON object with this EXACT structure. Do NOT nest it inside another object like {"evaluation": {...}}. The response must START with {"criteria_scores": [...
 
 The structure must be:
@@ -240,10 +270,18 @@ The structure must be:
     {
       "criterion": "Clarity & Specificity",
       "category": "Core Fundamentals",
+      "score": 5,
+      "strength": "Crystal clear objectives with precise constraints",
+      "improvement": "None needed - exemplary clarity",
+      "rationale": "The prompt perfectly defines requirements with specific, unambiguous instructions."
+    },
+    {
+      "criterion": "Context / Background Provided",
+      "category": "Core Fundamentals",
       "score": 4,
-      "strength": "Clear statement of purpose",
-      "improvement": "Add more specific constraints",
-      "rationale": "The prompt clearly defines what is needed but could benefit from additional details."
+      "strength": "Good context provided",
+      "improvement": "Add more domain-specific background",
+      "rationale": "Context is present but could be enhanced with industry specifics."
     },
     ... (repeat for all 50 criteria)
   ],
@@ -283,11 +321,13 @@ Guidelines:
 1. Maintain the original intent and core purpose
 2. Address specific weaknesses identified in the evaluation
 3. Incorporate GPT-5/Claude best practices (delimiters, reasoning strategies, contradiction-free instructions)
-4. Add appropriate structure using XML or Markdown
+4. Add appropriate structure (using XML tags or Markdown formatting) ONLY when it genuinely improves clarity - do not wrap the entire prompt in XML unless the original prompt was already in XML format
 5. Include reasoning strategy if beneficial
 6. Optimize for the target LLM provider if specified
 7. Add system prompt reminders for critical instructions
 8. Ensure no contradictory instructions
+
+IMPORTANT: The rewritten_prompt should be plain text that can be directly used. Only use XML/Markdown structure internally within the prompt content if it adds value (e.g., for sections, examples, or delimiters), but do not wrap the entire output in XML tags.
 
 Return a JSON object with this structure:
 {
@@ -498,7 +538,7 @@ Focus evaluation on agentic patterns and tool use. Use full 50 criteria but emph
 ## Priority Areas (Weight 2x):
 - **Agentic Workflow Design** (Criterion 36)
 - **Tool Use Specification** (Criterion 37)
-- **System Prompt Reminders** (Criterion 38)
+- **Execution Feedback Loops** (Criterion 38)
 - **Planning-Induced Reasoning** (Criterion 39)
 - **Parallel Tool Safety** (Criterion 40)
 - **Tool Calling Patterns** (Criterion 17)
@@ -897,7 +937,8 @@ async def get_settings():
 
 
 @api_router.post("/evaluate", response_model=Evaluation)
-async def evaluate_prompt(input: EvaluateRequest):
+@limiter.limit("10/minute")  # Strict limit for expensive LLM calls
+async def evaluate_prompt(request: Request, input: EvaluateRequest):
     """Evaluate a prompt using the configured LLM"""
     # Get settings
     settings_doc = await db.settings.find_one()
@@ -905,6 +946,61 @@ async def evaluate_prompt(input: EvaluateRequest):
         raise HTTPException(status_code=400, detail="Please configure LLM settings first")
     
     settings = Settings(**parse_from_mongo(settings_doc))
+    
+    # Initialize cache manager
+    cache = get_cache_manager()
+    
+    # Check cache first
+    cached_result = cache.get_evaluation(
+        prompt_text=input.prompt_text,
+        evaluation_mode=input.evaluation_mode,
+        provider=settings.llm_provider,
+        model=settings.model_name or "default"
+    )
+    
+    if cached_result:
+        logging.info("✅ Returning cached evaluation")
+        # Return cached result as Evaluation object
+        criteria_scores = [CriterionScore(**cs) for cs in cached_result['criteria_scores']]
+        category_scores = [CategoryScore(**cs) for cs in cached_result['category_scores']] if 'category_scores' in cached_result else None
+        provider_scores = [ProviderScore(**ps) for ps in cached_result['provider_scores']] if 'provider_scores' in cached_result else None
+        contradiction_analysis = ContradictionDetection(**cached_result['contradiction_analysis']) if 'contradiction_analysis' in cached_result else None
+        
+        # Filter refinement suggestions based on score (same logic as non-cached)
+        refinement_suggestions = cached_result['refinement_suggestions']
+        max_score = cached_result.get('max_score', 250)
+        score_percentage = (cached_result['total_score'] / max_score) * 100
+        
+        if score_percentage >= 96:
+            low_scoring_criteria = [cs for cs in criteria_scores if cs.score < 5]
+            
+            if not low_scoring_criteria:
+                refinement_suggestions = [
+                    "🎉 Excellent work! Your prompt scores perfectly across all criteria.",
+                    "Consider testing with different use cases to ensure broad applicability.",
+                    "You may still want to run security testing and cost optimization."
+                ]
+            else:
+                refinement_suggestions = [
+                    f"Minor improvement possible: {cs.improvement}" 
+                    for cs in low_scoring_criteria[:5]
+                ]
+        
+        return Evaluation(
+            id=cached_result.get('id', str(uuid.uuid4())),
+            prompt_text=cached_result['prompt_text'],
+            llm_provider=cached_result['llm_provider'],
+            model_name=cached_result.get('model_name'),
+            criteria_scores=criteria_scores,
+            total_score=cached_result['total_score'],
+            max_score=max_score,
+            refinement_suggestions=refinement_suggestions,
+            category_scores=category_scores,
+            provider_scores=provider_scores,
+            contradiction_analysis=contradiction_analysis,
+            evaluation_mode=cached_result.get('evaluation_mode', 'standard'),
+            created_at=datetime.fromisoformat(cached_result['created_at']) if isinstance(cached_result.get('created_at'), str) else cached_result.get('created_at', datetime.now(timezone.utc))
+        )
     
     # Get evaluation from LLM
     try:
@@ -934,6 +1030,24 @@ async def evaluate_prompt(input: EvaluateRequest):
         if 'contradiction_analysis' in evaluation_data:
             contradiction_analysis = ContradictionDetection(**evaluation_data['contradiction_analysis'])
         
+        # Calculate weighted scores
+        scoring_engine = get_scoring_engine()
+        try:
+            use_case_profile = UseCaseProfile(input.use_case)
+        except ValueError:
+            use_case_profile = UseCaseProfile.GENERAL
+        
+        weighted_analysis = scoring_engine.calculate_weighted_score(
+            criteria_scores=[cs.dict() for cs in criteria_scores],
+            use_case=use_case_profile
+        )
+        
+        # Add recommendations to weighted analysis
+        weighted_analysis['recommendations'] = scoring_engine.get_recommendations(
+            weighted_analysis,
+            min_acceptable_score=70.0
+        )
+        
         # Determine max score based on mode
         max_scores = {
             "quick": 50,      # 10 criteria × 5
@@ -944,6 +1058,29 @@ async def evaluate_prompt(input: EvaluateRequest):
         }
         max_score = max_scores.get(input.evaluation_mode, 250)
         
+        # Filter refinement suggestions based on score
+        refinement_suggestions = evaluation_data['refinement_suggestions']
+        score_percentage = (evaluation_data['total_score'] / max_score) * 100
+        
+        # If near-perfect score (96%+), filter suggestions
+        if score_percentage >= 96:
+            # Only show suggestions for criteria that scored less than 5
+            low_scoring_criteria = [cs for cs in criteria_scores if cs.score < 5]
+            
+            if not low_scoring_criteria:
+                # Perfect score - show congratulatory message
+                refinement_suggestions = [
+                    "🎉 Excellent work! Your prompt scores perfectly across all criteria.",
+                    "Consider testing with different use cases to ensure broad applicability.",
+                    "You may still want to run security testing and cost optimization."
+                ]
+            else:
+                # Near-perfect but has some 4s - only show relevant suggestions
+                refinement_suggestions = [
+                    f"Minor improvement possible: {cs.improvement}" 
+                    for cs in low_scoring_criteria[:5]
+                ]
+        
         evaluation = Evaluation(
             prompt_text=input.prompt_text,
             llm_provider=settings.llm_provider,
@@ -951,16 +1088,28 @@ async def evaluate_prompt(input: EvaluateRequest):
             criteria_scores=criteria_scores,
             total_score=evaluation_data['total_score'],
             max_score=max_score,
-            refinement_suggestions=evaluation_data['refinement_suggestions'],
+            refinement_suggestions=refinement_suggestions,
             category_scores=category_scores,
             provider_scores=provider_scores,
             contradiction_analysis=contradiction_analysis,
-            evaluation_mode=input.evaluation_mode
+            evaluation_mode=input.evaluation_mode,
+            use_case=input.use_case,
+            weighted_analysis=weighted_analysis
         )
         
         # Save to database
         eval_data = prepare_for_mongo(evaluation.dict())
         await db.evaluations.insert_one(eval_data)
+        
+        # Cache the result for future requests
+        cache.set_evaluation(
+            prompt_text=input.prompt_text,
+            evaluation_mode=input.evaluation_mode,
+            provider=settings.llm_provider,
+            model=settings.model_name or "default",
+            evaluation_data=evaluation.dict(exclude={'created_at'}),
+            ttl_hours=24
+        )
         
         return evaluation
         
@@ -1053,7 +1202,8 @@ async def export_pdf(evaluation_id: str):
 
 
 @api_router.post("/rewrite")
-async def rewrite_prompt(input: RewriteRequest):
+@limiter.limit("10/minute")  # Strict limit for expensive LLM calls
+async def rewrite_prompt(request: Request, input: LegacyRewriteRequest):
     """AI-powered prompt rewriting based on evaluation feedback"""
     # Get settings
     settings_doc = await db.settings.find_one()
@@ -1153,7 +1303,8 @@ Original Prompt:
 
 
 @api_router.post("/playground")
-async def test_prompt_in_playground(input: PlaygroundRequest):
+@limiter.limit("10/minute")
+async def test_prompt_in_playground(request: Request, input: PlaygroundRequest):
     """Test a prompt with sample input in a live playground"""
     # Get settings or use provided provider
     settings_doc = await db.settings.find_one()
@@ -1223,7 +1374,8 @@ async def test_prompt_in_playground(input: PlaygroundRequest):
 
 
 @api_router.post("/detect-contradictions")
-async def detect_contradictions(input: ContradictionRequest):
+@limiter.limit("15/minute")
+async def detect_contradictions(request: Request, input: ContradictionRequest):
     """Detect contradictory or conflicting instructions in a prompt"""
     # Get settings
     settings_doc = await db.settings.find_one()
@@ -1299,7 +1451,8 @@ async def detect_contradictions(input: ContradictionRequest):
 
 
 @api_router.post("/analyze-delimiters")
-async def analyze_delimiters(input: DelimiterAnalysisRequest):
+@limiter.limit("15/minute")
+async def analyze_delimiters(request: Request, input: DelimiterAnalysisRequest):
     """Analyze delimiter strategy and structure of a prompt"""
     # Get settings
     settings_doc = await db.settings.find_one()
@@ -1375,7 +1528,8 @@ async def analyze_delimiters(input: DelimiterAnalysisRequest):
 
 
 @api_router.post("/generate-metaprompt")
-async def generate_metaprompt(input: MetapromptRequest):
+@limiter.limit("10/minute")
+async def generate_metaprompt(request: Request, input: MetapromptRequest):
     """Generate metaprompt suggestions for improving a prompt"""
     # Get settings
     settings_doc = await db.settings.find_one()
@@ -1457,7 +1611,8 @@ While keeping as much of the existing prompt intact as possible, what are some m
 
 
 @api_router.post("/ab-test")
-async def ab_test_prompts(request: ABTestRequest):
+@limiter.limit("5/minute")  # Lower limit for A/B tests (2x evaluations)
+async def ab_test_prompts(request: Request, input: ABTestRequest):
     """
     Run A/B test comparing two prompts with statistical analysis.
     Returns detailed comparison and determines winner with confidence level.
@@ -1616,8 +1771,570 @@ async def ab_test_prompts(request: ABTestRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Include the router in the main app
+@api_router.get("/cache/stats")
+async def get_cache_stats():
+    """Get Redis cache statistics"""
+    cache = get_cache_manager()
+    stats = cache.get_stats()
+    health = cache.health_check()
+    return {
+        "cache": stats,
+        "health": health
+    }
+
+
+@api_router.delete("/cache/clear")
+async def clear_cache():
+    """Clear all cached evaluations"""
+    cache = get_cache_manager()
+    success = cache.clear_all()
+    return {
+        "success": success,
+        "message": "Cache cleared successfully" if success else "Failed to clear cache"
+    }
+
+
+@api_router.websocket("/ws/evaluation/{evaluation_id}")
+async def websocket_evaluation(websocket: WebSocket, evaluation_id: str):
+    """
+    WebSocket endpoint for real-time evaluation progress updates
+    
+    Args:
+        evaluation_id: Unique evaluation ID to subscribe to
+    """
+    manager = get_connection_manager()
+    await manager.connect(websocket, evaluation_id)
+    
+    try:
+        while True:
+            # Keep connection alive and listen for client messages
+            data = await websocket.receive_text()
+            
+            # Handle client messages (ping/pong, cancel, etc.)
+            try:
+                message = json.loads(data)
+                
+                if message.get("type") == "ping":
+                    await websocket.send_json({
+                        "type": "pong",
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    
+            except json.JSONDecodeError:
+                logging.warning(f"Invalid JSON received: {data}")
+                
+    except WebSocketDisconnect:
+        await manager.disconnect(websocket, evaluation_id)
+        logging.info(f"WebSocket disconnected: {evaluation_id}")
+    except Exception as e:
+        logging.error(f"WebSocket error: {e}")
+        await manager.disconnect(websocket, evaluation_id)
+
+
+@api_router.get("/ws/stats")
+async def websocket_stats():
+    """Get WebSocket connection statistics"""
+    manager = get_connection_manager()
+    return manager.get_stats()
+
+
+@api_router.get("/use-cases")
+async def get_use_cases():
+    """Get available use case profiles for weighted scoring"""
+    return {
+        "use_cases": [
+            {
+                "id": profile.value,
+                "name": profile.value.replace("_", " ").title(),
+                "description": f"Optimized scoring for {profile.value.replace('_', ' ')} tasks"
+            }
+            for profile in UseCaseProfile
+        ],
+        "default": "general"
+    }
+
+
+class VersionCreateRequest(BaseModel):
+    prompt_id: str
+    content: str
+    branch: Optional[str] = "main"
+    message: Optional[str] = ""
+    author: Optional[str] = "anonymous"
+    performance_metrics: Optional[Dict[str, Any]] = None
+
+
+class BranchCreateRequest(BaseModel):
+    branch_name: str
+    from_version: Optional[str] = None
+    from_branch: Optional[str] = "main"
+
+
+class MergeRequest(BaseModel):
+    source_branch: str
+    target_branch: str
+    strategy: Optional[str] = "best_performing"
+    author: Optional[str] = "anonymous"
+
+
+@api_router.post("/batch-evaluate")
+@limiter.limit("3/minute")  # Lower limit for batch operations
+async def batch_evaluate(request: Request, prompts: List[str], evaluation_mode: str = "quick", use_case: str = "general"):
+    """
+    Batch evaluate multiple prompts
+    
+    Args:
+        prompts: List of prompt texts to evaluate
+        evaluation_mode: Evaluation mode (quick, standard, deep, etc.)
+        use_case: Use case profile for weighted scoring
+    
+    Returns:
+        List of evaluation summaries
+    """
+    # Get settings
+    settings_doc = await db.settings.find_one()
+    if not settings_doc:
+        raise HTTPException(status_code=400, detail="Please configure LLM settings first")
+    
+    settings = Settings(**parse_from_mongo(settings_doc))
+    
+    # Limit batch size
+    if len(prompts) > 10:
+        raise HTTPException(status_code=400, detail="Batch size limited to 10 prompts")
+    
+    results = []
+    cache = get_cache_manager()
+    
+    for i, prompt_text in enumerate(prompts, 1):
+        try:
+            # Check cache first
+            cached_result = cache.get_evaluation(
+                prompt_text=prompt_text,
+                evaluation_mode=evaluation_mode,
+                provider=settings.llm_provider,
+                model=settings.model_name or "default"
+            )
+            
+            if cached_result:
+                evaluation_id = cached_result.get('id', str(uuid.uuid4()))
+                total_score = cached_result.get('total_score', 0)
+                weighted_score = cached_result.get('weighted_analysis', {}).get('weighted_total_score', 0)
+                from_cache = True
+            else:
+                # Create evaluation
+                eval_request = EvaluateRequest(
+                    prompt_text=prompt_text,
+                    evaluation_mode=evaluation_mode,
+                    use_case=use_case
+                )
+                
+                # This will call the full evaluation flow
+                evaluation_data = await get_llm_evaluation(
+                    prompt_text,
+                    settings.llm_provider,
+                    settings.api_key,
+                    settings.model_name,
+                    evaluation_mode
+                )
+                
+                # Quick evaluation object creation
+                criteria_scores = [CriterionScore(**cs) for cs in evaluation_data['criteria_scores']]
+                
+                # Calculate weighted scores
+                scoring_engine = get_scoring_engine()
+                try:
+                    use_case_profile = UseCaseProfile(use_case)
+                except ValueError:
+                    use_case_profile = UseCaseProfile.GENERAL
+                
+                weighted_analysis = scoring_engine.calculate_weighted_score(
+                    criteria_scores=[cs.dict() for cs in criteria_scores],
+                    use_case=use_case_profile
+                )
+                
+                evaluation_id = str(uuid.uuid4())
+                total_score = evaluation_data['total_score']
+                weighted_score = weighted_analysis['weighted_total_score']
+                from_cache = False
+                
+                # Save minimal version to DB
+                eval_record = {
+                    "id": evaluation_id,
+                    "prompt_text": prompt_text,
+                    "total_score": total_score,
+                    "weighted_analysis": weighted_analysis,
+                    "evaluation_mode": evaluation_mode,
+                    "use_case": use_case,
+                    "batch_evaluation": True,
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }
+                await db.evaluations.insert_one(eval_record)
+                
+                # Cache it
+                cache.set_evaluation(
+                    prompt_text=prompt_text,
+                    evaluation_mode=evaluation_mode,
+                    provider=settings.llm_provider,
+                    model=settings.model_name or "default",
+                    evaluation_data=eval_record,
+                    ttl_hours=24
+                )
+            
+            results.append({
+                "index": i,
+                "evaluation_id": evaluation_id,
+                "prompt_preview": prompt_text[:100] + "..." if len(prompt_text) > 100 else prompt_text,
+                "total_score": total_score,
+                "weighted_score": weighted_score,
+                "from_cache": from_cache
+            })
+            
+        except Exception as e:
+            logging.error(f"Batch evaluation error for prompt {i}: {str(e)}")
+            results.append({
+                "index": i,
+                "error": str(e),
+                "prompt_preview": prompt_text[:100] + "..." if len(prompt_text) > 100 else prompt_text
+            })
+    
+    return {
+        "total": len(prompts),
+        "completed": len([r for r in results if "error" not in r]),
+        "failed": len([r for r in results if "error" in r]),
+        "cached": len([r for r in results if r.get("from_cache")]),
+        "evaluation_mode": evaluation_mode,
+        "use_case": use_case,
+        "results": results
+    }
+
+
+# ============= Prompt Versioning Endpoints =============
+
+@api_router.post("/prompts/versions")
+async def create_prompt_version(input: VersionCreateRequest):
+    """Create a new version of a prompt"""
+    version_control = await get_version_control(db)
+    version = await version_control.create_version(
+        prompt_id=input.prompt_id,
+        content=input.content,
+        branch=input.branch,
+        message=input.message,
+        author=input.author,
+        performance_metrics=input.performance_metrics
+    )
+    return version.to_dict()
+
+
+@api_router.get("/prompts/{prompt_id}/versions")
+async def get_prompt_versions(prompt_id: str, branch: Optional[str] = None, limit: int = 50):
+    """Get version history for a prompt"""
+    version_control = await get_version_control(db)
+    versions = await version_control.get_version_history(prompt_id, branch, limit)
+    return {"versions": [v.to_dict() for v in versions]}
+
+
+@api_router.get("/prompts/{prompt_id}/versions/{version_id}")
+async def get_specific_version(prompt_id: str, version_id: str):
+    """Get a specific version"""
+    version_control = await get_version_control(db)
+    version = await version_control.get_version(prompt_id, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return version.to_dict()
+
+
+@api_router.get("/prompts/{prompt_id}/latest")
+async def get_latest_version(prompt_id: str, branch: str = "main"):
+    """Get the latest version in a branch"""
+    version_control = await get_version_control(db)
+    version = await version_control.get_latest_version(prompt_id, branch)
+    if not version:
+        raise HTTPException(status_code=404, detail="No versions found")
+    return version.to_dict()
+
+
+@api_router.post("/prompts/{prompt_id}/branches")
+async def create_branch(prompt_id: str, input: BranchCreateRequest):
+    """Create a new branch"""
+    version_control = await get_version_control(db)
+    try:
+        branch = await version_control.create_branch(
+            prompt_id=prompt_id,
+            branch_name=input.branch_name,
+            from_version=input.from_version,
+            from_branch=input.from_branch
+        )
+        return branch
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@api_router.get("/prompts/{prompt_id}/branches")
+async def list_branches(prompt_id: str):
+    """List all branches for a prompt"""
+    version_control = await get_version_control(db)
+    branches = await version_control.list_branches(prompt_id)
+    return {"branches": branches}
+
+
+@api_router.post("/prompts/{prompt_id}/merge")
+async def merge_branches(prompt_id: str, input: MergeRequest):
+    """Merge branches"""
+    version_control = await get_version_control(db)
+    try:
+        merged_version = await version_control.merge_branches(
+            prompt_id=prompt_id,
+            source_branch=input.source_branch,
+            target_branch=input.target_branch,
+            strategy=input.strategy,
+            author=input.author
+        )
+        return merged_version.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@api_router.post("/prompts/{prompt_id}/rollback/{version_id}")
+async def rollback_version(prompt_id: str, version_id: str, branch: str = "main", author: str = "anonymous"):
+    """Rollback to a previous version"""
+    version_control = await get_version_control(db)
+    try:
+        rollback_version = await version_control.rollback(
+            prompt_id=prompt_id,
+            target_version=version_id,
+            branch=branch,
+            author=author
+        )
+        return rollback_version.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@api_router.get("/prompts/{prompt_id}/compare/{version_a}/{version_b}")
+async def compare_versions(prompt_id: str, version_a: str, version_b: str):
+    """Compare two versions"""
+    version_control = await get_version_control(db)
+    try:
+        comparison = await version_control.compare_versions(prompt_id, version_a, version_b)
+        return comparison
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ============= AI-Powered Features =============
+
+@api_router.post("/optimize-prompt")
+@limiter.limit("15/minute")
+async def optimize_prompt_endpoint(request: Request, prompt_text: str, quality_threshold: float = 0.9):
+    """
+    Automatically optimize a prompt using ML-powered strategies
+    
+    Args:
+        prompt_text: Prompt to optimize
+        quality_threshold: Minimum quality to maintain (0-1)
+    """
+    try:
+        optimizer = get_auto_optimizer()
+        result = await optimizer.optimize_prompt(prompt_text)
+        
+        return {
+            "original_prompt": result.original_prompt,
+            "optimized_prompt": result.optimized_prompt,
+            "improvements": result.improvements,
+            "predicted_score_increase": result.predicted_score_increase,
+            "confidence": result.confidence,
+            "strategies_applied": result.strategies_applied,
+            "validation": result.validation
+        }
+    except Exception as e:
+        logging.error(f"Optimization error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/workflows")
+async def create_workflow_endpoint(
+    name: str,
+    description: str,
+    steps: List[Dict[str, Any]],
+    execution_mode: str = "dag"
+):
+    """
+    Create a multi-step prompt workflow
+    
+    Args:
+        name: Workflow name
+        description: Workflow description
+        steps: List of workflow steps
+        execution_mode: sequential|parallel|dag
+    """
+    try:
+        orchestrator = get_orchestrator()
+        mode = ExecutionMode(execution_mode)
+        workflow = orchestrator.create_workflow(name, description, steps, mode)
+        
+        return {
+            "workflow_id": workflow.workflow_id,
+            "name": workflow.name,
+            "description": workflow.description,
+            "steps_count": len(workflow.steps),
+            "execution_mode": workflow.execution_mode.value,
+            "created_at": workflow.created_at.isoformat()
+        }
+    except Exception as e:
+        logging.error(f"Workflow creation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/workflows/{workflow_id}/execute")
+@limiter.limit("5/minute")
+async def execute_workflow_endpoint(
+    request: Request,
+    workflow_id: str,
+    input_data: Dict[str, Any]
+):
+    """Execute a workflow"""
+    try:
+        orchestrator = get_orchestrator()
+        result = await orchestrator.execute_workflow(workflow_id, input_data)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logging.error(f"Workflow execution error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/workflows")
+async def list_workflows_endpoint():
+    """List all workflows"""
+    orchestrator = get_orchestrator()
+    return {"workflows": orchestrator.list_workflows()}
+
+
+@api_router.get("/workflows/{workflow_id}")
+async def get_workflow_endpoint(workflow_id: str):
+    """Get workflow details"""
+    orchestrator = get_orchestrator()
+    workflow = orchestrator.get_workflow(workflow_id)
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    
+    return {
+        "workflow_id": workflow.workflow_id,
+        "name": workflow.name,
+        "description": workflow.description,
+        "steps": [
+            {
+                "step_id": s.step_id,
+                "name": s.name,
+                "dependencies": s.dependencies,
+                "status": s.status.value
+            }
+            for s in workflow.steps
+        ],
+        "execution_mode": workflow.execution_mode.value
+    }
+
+
+@api_router.post("/security-test")
+@limiter.limit("10/minute")
+async def security_test_endpoint(request: Request, prompt_text: str):
+    """
+    Test prompt for security vulnerabilities
+    
+    Args:
+        prompt_text: Prompt to test
+    """
+    try:
+        tester = get_adversarial_tester()
+        report = tester.test_prompt_security(prompt_text)
+        
+        return {
+            "security_score": report.security_score,
+            "vulnerabilities": [
+                {
+                    "type": v.vuln_type.value,
+                    "severity": v.severity.value,
+                    "description": v.description,
+                    "attack_vector": v.attack_vector,
+                    "mitigation": v.mitigation,
+                    "confidence": v.confidence
+                }
+                for v in report.vulnerabilities
+            ],
+            "hardened_prompt": report.hardened_prompt,
+            "test_results": report.test_results,
+            "timestamp": report.timestamp
+        }
+    except Exception as e:
+        logging.error(f"Security test error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/optimize-cost")
+@limiter.limit("15/minute")
+async def optimize_cost_endpoint(
+    request: Request,
+    prompt_text: str,
+    quality_threshold: float = 0.9,
+    target_model: str = "gpt-4o"
+):
+    """
+    Optimize prompt for token efficiency and cost reduction
+    
+    Args:
+        prompt_text: Prompt to optimize
+        quality_threshold: Minimum quality to maintain (0-1)
+        target_model: Target LLM model for cost calculation
+    """
+    try:
+        optimizer = get_cost_optimizer()
+        result = optimizer.optimize_for_cost(prompt_text, quality_threshold, target_model)
+        
+        return {
+            "original_prompt": result.original_prompt,
+            "optimized_prompt": result.optimized_prompt,
+            "original_tokens": result.original_tokens,
+            "optimized_tokens": result.optimized_tokens,
+            "tokens_saved": result.tokens_saved,
+            "percentage_saved": result.percentage_saved,
+            "quality_score": result.quality_score,
+            "monthly_cost_reduction": result.monthly_cost_reduction,
+            "strategies_applied": result.strategies_applied
+        }
+    except Exception as e:
+        logging.error(f"Cost optimization error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/analyze-cost")
+async def analyze_cost_endpoint(
+    prompt_text: str,
+    target_model: str = "gpt-4o",
+    monthly_calls: int = 1000
+):
+    """
+    Analyze cost breakdown for a prompt
+    
+    Args:
+        prompt_text: Prompt to analyze
+        target_model: Target LLM model
+        monthly_calls: Estimated monthly usage
+    """
+    try:
+        optimizer = get_cost_optimizer()
+        analysis = optimizer.analyze_cost_breakdown(prompt_text, target_model, monthly_calls)
+        return analysis
+    except Exception as e:
+        logging.error(f"Cost analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Initialize project API with database
+project_api.init_db(db)
+
+# Include the routers in the main app
 app.include_router(api_router)
+app.include_router(project_api.router)
 
 app.add_middleware(
     CORSMiddleware,

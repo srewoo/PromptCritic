@@ -1,10 +1,11 @@
-# PromptCritic 🎯
+# Athena 🏛️
+## Your Strategic Prompt Architect
 
-An AI-powered prompt evaluation tool that analyzes and scores prompts using a comprehensive **50-criteria rubric** based on the latest GPT-5, GPT-4.1, and Claude 3.7 best practices. Get actionable insights to improve your prompts with professional-grade evaluation powered by OpenAI, Claude, or Gemini.
+An AI-powered prompt optimization platform that analyzes, refines, and evaluates prompts using a comprehensive **50-criteria rubric** based on the latest GPT-5, GPT-4.1, and Claude 3.7 best practices. Get actionable insights to improve your prompts with professional-grade evaluation powered by OpenAI, Claude, or Gemini.
 
 ## 📋 Overview
 
-PromptCritic evaluates prompts across **50 expert criteria** organized into 7 categories:
+Athena evaluates prompts across **50 expert criteria** organized into 7 categories:
 
 **Core Fundamentals** - Clarity, context, task definition  
 **Modern Best Practices** - Delimiters, reasoning strategies, verbosity  
@@ -52,7 +53,7 @@ Before you begin, ensure you have the following installed:
 ### Step 1: Clone the Repository
 
 ```bash
-cd /Users/sharajrewoo/DemoReposQA/PromptCritic
+cd /Users/sharajrewoo/DemoReposQA/Athena
 ```
 
 ### Step 2: MongoDB Setup
@@ -131,7 +132,7 @@ pip install -r requirements.txt
 # Create .env file with your configuration
 cat > .env << EOF
 MONGO_URL=mongodb://localhost:27017
-DB_NAME=promptcritic
+DB_NAME=athena
 CORS_ORIGINS=http://localhost:3000
 EOF
 ```
@@ -211,7 +212,7 @@ yarn start
 ## 📁 Project Structure
 
 ```
-PromptCritic/
+Athena/
 ├── backend/
 │   ├── server.py              # FastAPI application & routes
 │   ├── requirements.txt       # Python dependencies
@@ -236,7 +237,7 @@ PromptCritic/
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `MONGO_URL` | MongoDB connection string | `mongodb://localhost:27017` |
-| `DB_NAME` | Database name | `promptcritic` |
+| `DB_NAME` | Database name | `athena` |
 | `CORS_ORIGINS` | Allowed frontend origins | `http://localhost:3000` |
 
 ## 🛠️ Troubleshooting
