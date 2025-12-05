@@ -300,15 +300,13 @@ class DatasetGenerator:
 
         prompt = f"""You are an expert test data generator. Your task is to generate REALISTIC INPUT DATA that would be sent to an AI system for processing.
 
-## CRITICAL INSTRUCTION
-You are NOT generating instructions or commands. You are generating **ACTUAL DATA/CONTENT** that a user would provide as input to the system prompt below.
+## CRITICAL UNDERSTANDING - READ CAREFULLY
 
-Read the system prompt carefully to understand:
-1. What TYPE of input data this system expects (e.g., Jira tickets, customer emails, code snippets, documents, etc.)
-2. What FORMAT the input should be in
-3. What CONTENT the system is designed to process
+The system prompt below describes an AI assistant that will RECEIVE input data and PRODUCE output.
+Your job is to generate **sample INPUT data** that this AI would receive.
 
-Then generate realistic examples of that input data.
+**WRONG approach**: Generating descriptions of what the system does (e.g., "User can reset password successfully")
+**CORRECT approach**: Generating actual input content the system would process (e.g., actual bug report text, actual customer complaint, actual code snippet)
 
 ## System Prompt Being Tested
 ```
@@ -321,78 +319,90 @@ Then generate realistic examples of that input data.
 ## Key Requirements
 {chr(10).join([f"- {req}" for req in requirements.key_requirements])}
 
-## UNDERSTANDING THE INPUT FORMAT
+## ANALYZE THE SYSTEM PROMPT
 
-Based on the system prompt above, identify:
-- What type of content does this system process? (e.g., Jira tickets, support tickets, documents, code, etc.)
-- What fields or structure does the input have?
-- What domain-specific terminology should be used?
+Based on the system prompt, determine:
+1. **What INPUT does this system receive?** (e.g., Jira tickets? Emails? Code? Documents?)
+2. **What OUTPUT does it produce?** (e.g., test cases? summaries? reviews?)
+3. **Generate INPUTS, not OUTPUTS!**
+
+For example:
+- If the system "generates test cases from Jira tickets" → Generate realistic Jira ticket content (bugs, stories, tasks)
+- If the system "summarizes customer feedback" → Generate realistic customer feedback/complaints
+- If the system "reviews code" → Generate actual code snippets to review
 
 ## Test Case Distribution Required
-- **Positive cases**: {distribution.get('positive', 0)} - Well-formed, realistic inputs the system should handle well
-- **Edge cases**: {distribution.get('edge_case', 0)} - Unusual but valid inputs, boundary conditions
-- **Negative cases**: {distribution.get('negative', 0)} - Malformed inputs, missing data, out-of-scope content
-- **Adversarial cases**: {distribution.get('adversarial', 0)} - Attempts to confuse or manipulate the system
+- **Positive cases**: {distribution.get('positive', 0)} - Well-formed, realistic inputs
+- **Edge cases**: {distribution.get('edge_case', 0)} - Unusual but valid inputs
+- **Negative cases**: {distribution.get('negative', 0)} - Poor quality or incomplete inputs
+- **Adversarial cases**: {distribution.get('adversarial', 0)} - Tricky or challenging inputs
 
-## EXAMPLES OF WHAT TO GENERATE
+## CONCRETE EXAMPLES
 
-If the system prompt processes **Jira tickets**, generate realistic Jira content like:
+### If generating Jira ticket inputs:
+
+GOOD (actual Jira content):
 ```
-Summary: User login fails after password reset
-Description: Steps to reproduce:
-1. Reset password via forgot password link
-2. Enter new password
-3. Try to login with new password
-Expected: Login succeeds
-Actual: Error "Invalid credentials"
+Summary: Payment fails with expired credit card
+Description:
+Environment: Production
+Browser: Chrome 120
+
+Steps to reproduce:
+1. Add items to cart ($50 total)
+2. Go to checkout
+3. Enter expired credit card (any card with past date)
+4. Click "Pay Now"
+
+Expected Result: Clear error message about expired card
+Actual Result: Generic "Payment failed" error, no retry option
+
 Acceptance Criteria:
-- User can login after password reset
-- Error message is cleared
+- Display specific error for expired cards
+- Allow user to update card details inline
+- Log failed attempt for analytics
 ```
 
-If the system prompt processes **customer support emails**, generate realistic emails like:
+BAD (meta-description):
 ```
-Subject: Order #12345 not delivered
-Hi, I placed an order 5 days ago and it still shows "processing".
-My order number is 12345. Can you please check the status?
-Thanks, John
+{{'Summary': 'User can reset password successfully', 'Description': '1. Navigate to login page...'}}
 ```
+The "bad" example describes a TEST CASE, not actual Jira ticket content.
 
-If the system prompt processes **code for review**, generate actual code snippets.
+### If generating customer support email inputs:
+
+GOOD (actual email):
+```
+Subject: Damaged item received - Order #98765
+
+I received my order today but the ceramic vase was completely shattered.
+The box had no "fragile" marking and minimal padding. This was a gift
+for my mother's birthday tomorrow. Can you send a replacement overnight?
+
+Attached: photos of damaged item and packaging
+```
 
 ## OUTPUT FORMAT
-You MUST return a valid JSON object with a "test_cases" array. Each test case should have:
-- "input": The ACTUAL INPUT DATA (not an instruction, but realistic content the system would process)
-- "category": One of ["positive", "edge_case", "negative", "adversarial"]
-- "test_focus": What aspect this tests (e.g., "requirement_1", "formatting", "error_handling")
-- "difficulty": One of ["easy", "medium", "hard"]
-
-Return EXACTLY this JSON structure:
+Return valid JSON with "test_cases" array:
 ```json
 {{
   "test_cases": [
     {{
-      "input": "<realistic input data>",
+      "input": "<ACTUAL input content the system would receive - NOT a description of a test>",
       "category": "positive",
-      "test_focus": "requirement_1",
+      "test_focus": "functionality",
       "difficulty": "easy"
-    }},
-    {{
-      "input": "<another realistic input>",
-      "category": "edge_case",
-      "test_focus": "formatting",
-      "difficulty": "medium"
     }}
   ]
 }}
 ```
 
-## IMPORTANT REMINDERS
-1. DO NOT generate generic phrases like "Generate test cases for..." or "Help me with..."
-2. DO generate actual content/data that the system prompt is designed to process
-3. Make inputs realistic - use real-world examples, proper formatting, domain terminology
-4. Vary the complexity and content while staying true to the expected input format
-5. You MUST return valid JSON with the exact structure shown above
+## FINAL CHECKLIST
+Before generating each input, ask yourself:
+- Is this ACTUAL CONTENT the system would process?
+- Or is this a DESCRIPTION/META-TEST of what should happen?
+
+Generate actual content, NOT meta-descriptions!
 
 Generate exactly {total_cases} test cases following the distribution above.
 """
@@ -405,7 +415,7 @@ Generate exactly {total_cases} test cases following the distribution above.
             response = client.chat.completions.create(
                 model=model_name or "gpt-4o",
                 messages=[
-                    {"role": "system", "content": "You are an expert test data generator. Always respond with valid JSON containing a 'test_cases' array."},
+                    {"role": "system", "content": "You are an expert test INPUT data generator. Generate realistic INPUT content that a system would process - NOT descriptions of tests or expected behaviors. For example, if asked to generate inputs for a 'Jira ticket processor', generate actual bug reports/user stories with real technical content, NOT test case descriptions like 'User can login'. Always respond with valid JSON containing a 'test_cases' array."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.8,
@@ -427,7 +437,7 @@ Generate exactly {total_cases} test cases following the distribution above.
             response = await client.chat.completions.create(
                 model=model_name or "gpt-4o",
                 messages=[
-                    {"role": "system", "content": "You are an expert test data generator. Always respond with valid JSON containing a 'test_cases' array."},
+                    {"role": "system", "content": "You are an expert test INPUT data generator. Generate realistic INPUT content that a system would process - NOT descriptions of tests or expected behaviors. For example, if asked to generate inputs for a 'Jira ticket processor', generate actual bug reports/user stories with real technical content, NOT test case descriptions like 'User can login'. Always respond with valid JSON containing a 'test_cases' array."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.8,
@@ -448,6 +458,7 @@ Generate exactly {total_cases} test cases following the distribution above.
             response = client.messages.create(
                 model=model_name or "claude-3-5-sonnet-20241022",
                 max_tokens=8000,
+                system="You are an expert test INPUT data generator. Generate realistic INPUT content that a system would process - NOT descriptions of tests or expected behaviors. For example, if asked to generate inputs for a 'Jira ticket processor', generate actual bug reports/user stories with real technical content, NOT test case descriptions like 'User can login'. Always respond with valid JSON containing a 'test_cases' array.",
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
@@ -467,6 +478,7 @@ Generate exactly {total_cases} test cases following the distribution above.
             response = await client.messages.create(
                 model=model_name or "claude-3-5-sonnet-20241022",
                 max_tokens=8000,
+                system="You are an expert test INPUT data generator. Generate realistic INPUT content that a system would process - NOT descriptions of tests or expected behaviors. For example, if asked to generate inputs for a 'Jira ticket processor', generate actual bug reports/user stories with real technical content, NOT test case descriptions like 'User can login'. Always respond with valid JSON containing a 'test_cases' array.",
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
